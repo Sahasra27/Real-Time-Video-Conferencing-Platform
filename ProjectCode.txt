@@ -1,0 +1,3765 @@
+
+============================================================
+FILE: E:\VC\backend\.env
+============================================================
+MONGO_URL=mongodb+srv://testuser:Test1234@cluster0.bosv8aa.mongodb.net/?retryWrites=true&w=majority
+
+
+============================================================
+FILE: E:\VC\backend\app.js
+============================================================
+import dotenv from "dotenv";
+dotenv.config(); //This line loads environment variables from a .env file into the Node.js process environment.
+
+import express from "express";
+import { createServer } from "node:http";
+import connectToSocket from "./controllers/socketmanager.js";
+import mongoose from "mongoose";
+import cors from "cors";
+import userRoutes from "./routes/userroutes.js";
+
+const url = process.env.MONGO_URL; // make sure .env has MONGO_URL
+const PORT = process.env.PORT || 8000;
+
+const app = express();//created app instance .....express() → brain (logic, routes)
+const server = createServer(app);//createServer() → body (actually receives requests)
+//Client → HTTP Server → Express app → Response
+//const io = new Server(server);//new Server(server) → adds live communication ability (like phone calls instead of emails)
+const io = connectToSocket(server);
+//Socket.IO now 1️⃣hooks into the HTTP server.It starts listening to the same server:
+//2️⃣ Intercepts special requests 👉 Socket.IO says:“This request is mine, not Express”....3️⃣ Handles protocol upgrade....4️⃣ Maintains persistent connections
+
+app.use(cors());
+app.use(express.json({limit:"40kb"}));
+app.use(express.urlencoded({limit:"40kb",extended:true}));
+app.use("/api/v1/users",userRoutes);//“For any request starting with /api/v1/users, use userRoutes to handle it.”
+
+app.get("/home", (req, res) => {
+  return res.json({ "hello": "World" });
+});
+
+// Debug (optional but useful)
+console.log("Mongo URL:", url);
+
+if (!url) {
+  console.error("MONGO_URL is not defined in .env");
+  process.exit(1);
+}
+
+mongoose.connect(url)
+  .then(() => console.log("MongoDB connected"))
+  .catch(err => console.log(err));
+
+server.listen(PORT, () => {
+  console.log("App started on port", PORT);
+});
+
+============================================================
+FILE: E:\VC\backend\package.json
+============================================================
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/app.js",
+    "start": "node src/app.js",
+    "prod": "pm2 src/app.js"
+  },
+  "author": "Sahasra",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "http-status": "^2.1.0",
+    "mongoose": "^9.6.1",
+    "nodemon": "^3.1.14",
+    "socket.io": "^4.8.3"
+  }
+}
+
+============================================================
+FILE: E:\VC\backend\controllers\socketmanager.js
+============================================================
+import {Server} from "socket.io"
+import cors from "cors";
+
+let connections={}
+let messages={}
+let timeOnline={}
+let users = {}
+/*
+io      → whole server (all users)
+socket  → one specific user
+Your device is behind a router using Network Address Translation.
+You see a private IP like 192.168.x.x, which isn’t reachable from the internet.
+*/
+
+export default (server) => {
+    const io = new Server(server, {
+        cors:{
+            origin: "*",
+            methods: ["GET","POST"],
+            allowedHeaders: ["*"],
+            credentials: true
+        }
+    });//👉 Initializes WebSocket server
+    io.on("connection",(socket)=>{/*
+        handle each incoming client connection and get its socket”
+        👉 Runs every time a client connects
+socket = this specific user’s connection
+socket.id = unique ID for that user */    
+console.log("SOMETHING CONNECTED");    
+        socket.on(
+    "join-call",
+    ({ path, username })=>{//socket.on() listens for events sent by that specific client
+            
+            if(connections[path]==undefined){
+                connections[path]=[]
+            }
+
+            connections[path].push(socket.id);
+            timeOnline[socket.id]=new Date();
+            users[socket.id] = username;
+
+           /* ConnectionStates[path].forEach(elem=>{
+                    io.to(elem)
+                })*/
+
+            // ❌ fixed i++ → a++
+            for (let a=0 ;a<connections[path].length;a++){
+io.to(
+    connections[path][a]
+).emit(
+    "user-joined",
+    socket.id,
+    connections[path],
+    users
+)            }
+
+            // ❌ fixed typos message → messages, massages → messages
+            if(messages[path]!=undefined){
+                for(let a=0;a<messages[path].length;++a){
+                    io.to(socket.id).emit(
+                        "chat-message",
+                        messages[path][a]['data'],
+                        messages[path][a]['sender'],
+                        messages[path][a]['socket-id-sender']
+                    )
+                }
+            }
+
+        })
+
+        socket.on("signal",(toId,message)=>{
+            io.to(toId).emit("signal",socket.id,message);
+            /*The Socket.IO server-io...👉 Targets a specific socket (user) -toId = socket ID of receiver*/
+        })
+
+        socket.on("chat-message",(data ,sender)=>{
+
+            const[matchingRoom,found]=Object.entries(connections)
+            /*👉 converts object into array:
+            [
+              ["room1", ["A123", "B456"]],
+              ["room2", ["C789"]]
+            ] 
+              array.reduce((accumulator, current) => {
+                return updatedAccumulator;
+            }, initialValue);*/
+            .reduce(([room, isFound],[roomKey,roomValue])=>{
+                
+                if(!isFound && roomValue.includes(socket.id)){
+                    return [roomKey,true];
+                }
+                return [room,isFound];
+
+            },['',false]);
+
+            if(found==true){
+
+                if(messages[matchingRoom]==undefined){
+                    messages[matchingRoom]=[]
+                }
+
+                messages[matchingRoom].push({
+                    'sender':sender,
+                    'data':data,
+                    'socket-id-sender':socket.id
+                })
+
+                // ❌ fixed KeyboardEvent
+                console.log("message:",sender,data)
+
+                connections[matchingRoom].forEach((elem)=>{
+                    io.to(elem).emit("chat-message",data,sender,socket.id)
+                })    
+            }
+        })
+
+        socket.on("disconnect",()=>{
+
+            let diffTime=Math.abs(timeOnline[socket.id]-new Date())
+           
+            let key 
+
+            // ❌ removed unnecessary JSON parse/stringify
+            for(const[k,v] of Object.entries(connections)){
+                
+                for(let a=0;a<v.length;++a){
+
+                    if(v[a]==socket.id){
+
+                        key=k
+
+                        // ❌ fixed loop condition + emit syntax
+                        for(let i=0;i<connections[key].length;++i){
+                            io.to(connections[key][i]).emit('user-left',socket.id)
+                        }
+
+                        let index = connections[key].indexOf(socket.id)
+
+                        // ❌ safe removal
+                        if(index !== -1){
+                            connections[key].splice(index,1)
+                        }
+
+                        if(connections[key].length==0){
+                            delete connections[key]
+                        }
+                    }
+                }
+            }
+        })
+
+    })
+    return io;
+
+}
+
+============================================================
+FILE: E:\VC\backend\controllers\usercontroller.js
+============================================================
+import httpStatus from "http-status";
+import {User} from "../models/usermodel.js";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+const login = async (req,res)=>{
+const {username,password}=req.body;
+
+if(!username||!password){
+    return res.status(400).json({message:"Please Provide"})
+}
+try{
+    const user = await User.findOne({username});
+    if(!user){
+        return res.status(httpStatus.NOT_FOUND).json({message:"User Not Found"});
+    }
+        const isMatch = await bcrypt.compare(password, user.password);
+if (!isMatch){ return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid credentials" });
+        }
+
+       const token = crypto.randomBytes(32).toString("hex");/*We send token to the server 
+            //👉 Generates a random string (token with no meaning)
+            /*stored in DB  .....Server must look it up
+....Fully controllable (can delete anytime)*/
+user.token=token;
+await user.save();
+return res.status(httpStatus.OK).json({token: token});
+
+        
+    
+}catch(e){
+    return res.status(500).json({message:`Something went wrong ${e}`});
+
+
+}
+}
+const register = async(req,res)=>{
+    const {name,username,password}=req.body;
+        if (!name || !username || !password) {
+        return res.status(400).json({ message: "All fields required" });
+    }
+    try{
+        const existingUser = await User.findOne({username});
+        if(existingUser){
+            return res.status(httpStatus.CONFLICT).json({ message: "User already exists" });
+        }
+            const hashedPassword = await bcrypt.hash(password,10);
+    const newUser=new User    (
+        {
+            name:name,
+            username:username,
+            password:hashedPassword,
+        }
+    );
+    await newUser.save();
+return res.status(httpStatus.CONFLICT).json({ message: "User created" });    
+    
+    }catch(e){
+
+res.json({message:`Something went wrong ${e}`});
+    }
+}
+export {login , register};
+
+============================================================
+FILE: E:\VC\backend\models\meetingmodel.js
+============================================================
+import mongoose,{Schema} from "mongoose";
+const meetingSchema = new Schema(
+    {
+        user_id:{type:String},
+        meetingCode:{type:String, required:true},
+        date:{type:Date,default:Date.now,required:true},
+    }
+)
+const Meeting=mongoose.model("Meeting",meetingSchema);
+export {Meeting};
+
+============================================================
+FILE: E:\VC\backend\models\usermodel.js
+============================================================
+import mongoose,{Schema} from "mongoose";
+const userSchema = new Schema(
+    {
+        name:{type:String, required:true},
+        username:{type:String,required:true,unique:true},
+        password:{type:String,required:true},
+        token:{type:String},
+    }
+)
+const User = mongoose.model("User",userSchema);
+export {User};
+
+============================================================
+FILE: E:\VC\backend\routes\userroutes.js
+============================================================
+import {Router} from "express";
+import {login ,register} from "../controllers/usercontroller.js";
+const router = Router();
+router.route("/login").post(login);
+router.route("/register").post(register);
+router.route("/add_to_activity");
+router.route("/get_all_activity");
+export default router;
+/*User clicks “Sign Up” on frontend.
+handleRegister() runs in React frontend.
+client.post() sends a POST request to backend.
+Backend receives request at /register route.
+Backend processes data and sends response.
+Frontend checks response: */
+
+============================================================
+FILE: E:\VC\frontend\eslint.config.js
+============================================================
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{js,jsx}'],
+    extends: [
+      js.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      globals: globals.browser,
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+])
+
+============================================================
+FILE: E:\VC\frontend\index.html
+============================================================
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+
+============================================================
+FILE: E:\VC\frontend\package.json
+============================================================
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.0.0",
+    "@mui/material": "^9.0.0",
+    "axios": "^1.16.0",
+    "http-status": "^2.1.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.2",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
+    "vite": "^8.0.10"
+  }
+}
+
+============================================================
+FILE: E:\VC\frontend\vite.config.js
+============================================================
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+
+============================================================
+FILE: E:\VC\frontend\src\App.css
+============================================================
+
+.landingPageContainer {
+  width: 100vw;
+  height: 100vh;
+  background-image: url('./assets/vc.2.png');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  color: white;
+  overflow-x: hidden;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+/* ====== NAVBAR ====== */
+.landingPageContainer nav {
+  padding: 1.2rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.subText {
+  color: grey;
+  font-size: 0.8rem;
+}
+
+/* ====== GRADIENT TEXT ====== */
+.gradientText {
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ====== NAV LINKS ====== */
+.navlist {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.navLink {
+  text-decoration: none;
+  color: #cfcfff;
+  font-size: 0.9rem;
+  position: relative;
+  transition: 0.3s;
+}
+
+.navLink::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 0%;
+  height: 2px;
+  background: #7B61FF;
+  transition: 0.3s;
+}
+
+.navLink:hover {
+  color: white;
+}
+
+.navLink:hover::after {
+  width: 100%;
+}
+
+/* ====== NAV BUTTON ====== */
+.navButton {
+  text-decoration: none;
+  padding: 8px 18px;
+  border-radius: 20px;
+  background: rgba(123,97,255,0.15);
+  border: 1px solid rgba(123,97,255,0.4);
+  color: white;
+  backdrop-filter: blur(10px);
+  transition: 0.3s;
+}
+
+.navButton:hover {
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+  box-shadow: 0 0 15px rgba(123,97,255,0.6);
+}
+
+/* ====== MAIN ====== */
+.landingMainContainer {
+  padding: 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ====== LEFT ====== */
+.left {
+  margin: 50px;
+  flex: 1;
+}
+
+.left h1 {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+.left hr {
+  width: 300px;
+  border: 2px solid #7B61FF;
+  margin-top: 20px;
+  border-radius: 5px;
+}
+
+/* ====== CTA BUTTON ====== */
+.ctaButton {
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 30px;
+  font-weight: 500;
+  color: white;
+
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+
+  box-shadow: 
+    0 0 20px rgba(123,97,255,0.6),
+    0 0 40px rgba(79,140,255,0.3);
+
+  transition: 0.3s;
+}
+
+.ctaButton:hover {
+  box-shadow: 
+    0 0 0.5px rgba(123,97,255,0.6),
+    0 0 0.5px rgba(79,140,255,0.3);
+}
+
+/* ====== RIGHT ====== */
+.right {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ====== IMAGE BLENDING ====== */
+.right img {
+  width: 100%;
+  max-width: 700px;
+  height: auto;
+  border-radius: 20px;
+
+  -webkit-mask-image:
+    linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 30%),
+    linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 12%),
+    linear-gradient(to left, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%),
+    linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 12%);
+
+  -webkit-mask-composite: destination-in;
+  mask-composite: intersect;
+
+  box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+}
+
+/* ====== MOBILE ====== */
+@media (max-width: 768px) {
+  .landingMainContainer {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .left {
+    margin: 20px;
+  }
+
+  .right img {
+    max-width: 90%;
+  }
+}
+
+============================================================
+FILE: E:\VC\frontend\src\App.jsx
+============================================================
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import Landing from './pages/LandingPage.jsx';
+import './App.css'
+import { AuthProvider } from "./contexts/AuthContext.jsx";
+
+import Authentication from './pages/Authentication.jsx';
+import VideoMeetComponent from './pages/VideoMeet.jsx';
+
+function App() {
+  return (
+    <div className='App'>
+      <BrowserRouter>
+            <AuthProvider>
+
+        <Routes>
+          <Route path="/" element={<Landing />} />
+           <Route path="/auth" element={<Authentication />} />
+<Route path="/:url"element={<VideoMeetComponent/>}/>
+        </Routes>
+        </AuthProvider>
+
+      </BrowserRouter>
+    </div>
+  )
+}
+
+export default App;
+
+============================================================
+FILE: E:\VC\frontend\src\index.css
+============================================================
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+============================================================
+FILE: E:\VC\frontend\src\main.jsx
+============================================================
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+============================================================
+FILE: E:\VC\frontend\src\contexts\AuthContext.jsx
+============================================================
+import axios from "axios";
+
+import {
+  createContext,
+  useState,
+} from "react";
+
+import { useNavigate } from "react-router-dom";
+
+import { HttpStatusCode } from "axios";
+
+// ================= CREATE CONTEXT =================
+
+export const AuthContext = createContext({});
+
+// ================= AXIOS CLIENT =================
+
+const client = axios.create({
+  baseURL: "http://localhost:8000/api/v1/users",
+});
+
+// ================= PROVIDER =================
+
+export const AuthProvider = ({ children }) => {
+
+  const [userData, setUserData] =
+    useState(null);
+
+  const navigate = useNavigate();
+
+  // ================= REGISTER =================
+
+  const handleRegister = async (
+    name,
+    username,
+    password
+  ) => {
+
+    try {
+
+      let request = await client.post(
+        "/register",
+        {
+          name: name,
+          username: username,
+          password: password,
+        }
+      );
+
+      if (
+        request.status ===
+        HttpStatusCode.Created
+      ) {
+
+        return request.data.message;
+      }
+
+    } catch (err) {
+
+      throw err;
+    }
+  };
+
+  // ================= LOGIN =================
+
+  const handleLogin = async (
+    username,
+    password
+  ) => {
+
+    try {
+
+      let request = await client.post(
+        "/login",
+        {
+          username: username,
+          password: password,
+        }
+      );
+
+      if (
+        request.status ===
+        HttpStatusCode.Ok
+      ) {
+
+        // Store token
+        localStorage.setItem(
+          "token",
+          request.data.token
+        );
+
+        // Store user globally
+        setUserData(request.data.user);
+        // Navigate to homepage
+        navigate("/");
+
+        return request.data.message;
+      }
+
+    } catch (err) {
+
+      throw err;
+    }
+  };
+
+  // ================= CONTEXT DATA =================
+
+  const data = {
+    userData,
+    setUserData,
+    handleRegister,
+    handleLogin,
+  };
+
+  // ================= PROVIDER RETURN =================
+
+  return (
+    <AuthContext.Provider value={data}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+============================================================
+FILE: E:\VC\frontend\src\pages\Authentication.jsx
+============================================================
+import React from "react";
+
+import CssBaseline from "@mui/material/CssBaseline";
+import Stack from "@mui/material/Stack";
+import Card from "@mui/material/Card";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Box from "@mui/material/Box";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Snackbar from "@mui/material/Snackbar";
+
+import { AuthContext } from "../contexts/AuthContext";
+
+import bgImage from "../assets/vc.2.png";
+
+export default function Authentication() {
+ const [username, setUsername] = React.useState("");
+const [password, setPassword] = React.useState("");
+const [name, setName] = React.useState("");
+
+const [error, setError] = React.useState("");
+const [messages, setMessages] = React.useState("");
+
+const [formState, setFormState] = React.useState(0);
+
+const [open, setOpen] = React.useState(false);
+  const {handleRegister, handleLogin}= React.useContext(AuthContext);
+ let handleAuth = async () => {
+
+  try {
+
+ 
+
+  if (formState === 1) {
+
+    let result = await handleRegister(
+      name,
+      username,
+      password
+    );
+    setMessages(result);
+
+    setUsername("");
+    setPassword("");
+setFormState(0);
+
+
+    setOpen(true);
+  } else {
+    
+    let result = await handleLogin(
+      username,
+      password
+    );
+    setMessages(result);
+
+    setUsername("");
+    setPassword("");
+  }
+
+} catch (err) {
+
+  setMessages("");
+
+  let message =
+    err?.response?.data?.message ||
+    "Something went wrong";
+
+  setError(message);
+
+  setOpen(true);
+}
+ }
+  return (
+    <>
+      <CssBaseline />
+
+  <Stack
+  component="main"
+  sx={{
+    width: "100vw",
+    height: "100vh",
+
+    position: "fixed",
+    inset: 0,
+
+    display: "flex",
+
+    justifyContent: "center",
+    alignItems: "center",
+
+    overflow: "hidden",
+
+    backgroundImage: `url(${bgImage})`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+
+    "&::before": {
+      content: '""',
+
+      position: "absolute",
+
+      inset: 0,
+
+      background:
+        "linear-gradient(rgba(5,5,20,0.72), rgba(5,5,20,0.82))",
+
+      zIndex: 0,
+    },
+  }}
+>
+  <Card
+  sx={{
+    width: 450,
+
+    position: "relative",
+
+    zIndex: 2,
+
+    display: "flex",
+    flexDirection: "column",
+
+    justifyContent: "center",
+
+    padding: "54px 46px",
+
+    borderRadius: "36px",
+
+    overflow: "hidden",
+
+    background: `
+      linear-gradient(
+        155deg,
+        rgba(9,10,28,0.96) 0%,
+        rgba(16,18,45,0.93) 35%,
+        rgba(20,10,55,0.92) 100%
+      )
+    `,
+
+    backdropFilter: "blur(28px)",
+
+    border: "1px solid rgba(255,255,255,0.08)",
+
+    boxShadow: `
+      0 0 0 1px rgba(255,255,255,0.03),
+      0 10px 45px rgba(0,0,0,0.55),
+      0 0 90px rgba(91,33,182,0.28),
+      0 0 140px rgba(59,130,246,0.12)
+    `,
+
+    transition: "all 0.45s ease",
+
+    "&:hover": {
+      transform: "translateY(-6px) scale(1.01)",
+
+      boxShadow: `
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 14px 60px rgba(0,0,0,0.65),
+        0 0 110px rgba(147,51,234,0.35),
+        0 0 170px rgba(59,130,246,0.16)
+      `,
+    },
+
+    /* ===== TOP PURPLE GLOW ===== */
+
+    "&::before": {
+      content: '""',
+
+      position: "absolute",
+
+      top: "-180px",
+      right: "-180px",
+
+      width: "420px",
+      height: "420px",
+
+      background: `
+        radial-gradient(
+          circle,
+          rgba(168,85,247,0.30) 0%,
+          rgba(168,85,247,0.12) 35%,
+          transparent 72%
+        )
+      `,
+
+      zIndex: 0,
+    },
+
+    /* ===== BOTTOM BLUE GLOW ===== */
+
+    "&::after": {
+      content: '""',
+
+      position: "absolute",
+
+      bottom: "-220px",
+      left: "-180px",
+
+      width: "430px",
+      height: "430px",
+
+      background: `
+        radial-gradient(
+          circle,
+          rgba(59,130,246,0.22) 0%,
+          rgba(59,130,246,0.08) 38%,
+          transparent 74%
+        )
+      `,
+
+      zIndex: 0,
+    },
+  }}
+>  {/* ===== TITLE ===== */}
+
+
+          <Box
+            sx={{
+              position: "relative",
+              zIndex: 1,
+              textAlign: "center",
+              mb: 4,
+            }}
+          >
+           <Typography
+  variant="h3"
+  sx={{
+    fontWeight: 700,
+
+    letterSpacing: 1.5,
+
+    textShadow:
+      "0 0 20px rgba(162,89,255,0.5)",
+  }}
+>
+  <>
+    <span style={{ color: "white" }}>Meet</span>
+
+    <span
+      style={{
+        background: "linear-gradient(90deg, #7B61FF, #4F8CFF)",
+        WebkitBackgroundClip: "text",
+        WebkitTextFillColor: "transparent",
+      }}
+    >
+      Pro
+    </span>
+  </>
+</Typography>
+            <Typography
+              sx={{
+                mt: 1,
+
+                color: "rgba(255,255,255,0.65)",
+
+                fontSize: "0.95rem",
+
+                letterSpacing: 0.5,
+              }}
+            >
+              Connect • Collaborate • Communicate
+            </Typography>
+          </Box>
+          <Box
+  sx={{
+    mb: 2,
+    fontSize: "0.95rem",
+    letterSpacing: 0.5,
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 2,
+  }}
+>
+  <Button
+    variant={formState === 0 ? "contained" : "text"}
+    onClick={() => setFormState(0)}
+    sx={{
+      color: "#c084fc",
+      background:
+        formState === 0
+          ? "linear-gradient(90deg, #7f00ff, #e100ff)"
+          : "transparent",
+
+      "&:hover": {
+        background:
+          formState === 0
+            ? "linear-gradient(90deg, #7f00ff, #e100ff)"
+            : "rgba(255,255,255,0.08)",
+      },
+    }}
+  >
+    Sign In
+  </Button>
+
+  <Button
+    variant={formState === 1 ? "contained" : "text"}
+    onClick={() => setFormState(1)}
+    sx={{
+      color: "#c084fc",
+      background:
+        formState === 1
+          ? "linear-gradient(90deg, #7f00ff, #e100ff)"
+          : "transparent",
+
+      "&:hover": {
+        background:
+          formState === 1
+            ? "linear-gradient(90deg, #7f00ff, #e100ff)"
+            : "rgba(255,255,255,0.08)",
+      },
+    }}
+  >
+    Sign Up
+  </Button>
+</Box>
+
+{formState==1? <TextField
+            fullWidth
+            label="Full Name"
+            id="username"
+            variant="outlined"
+            margin="normal"
+            onChange={(e)=>setName(e.target.value)}
+            InputLabelProps={{
+              shrink: false,
+            }}
+            sx={{
+              position: "relative",
+              zIndex: 1,
+"& input:-webkit-autofill": {
+  WebkitBoxShadow:
+    "0 0 0 1000px rgb(28, 28, 54) inset",
+
+  WebkitTextFillColor: "white",
+
+  caretColor: "white",
+
+  borderRadius: "18px",
+
+  transition:
+    "background-color 9999s ease-in-out 0s",
+},
+              "& .MuiInputLabel-root": {
+                color: "#c084fc",
+                fontSize: "0.95rem",
+                fontWeight: 500,
+              },
+
+              "& .MuiInputLabel-root.Mui-focused": {
+                color: "#e879f9",
+              },
+
+              "& .MuiOutlinedInput-root": {
+                borderRadius: "18px",
+
+                background:
+                  "linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+
+                backdropFilter: "blur(12px)",
+
+                "& fieldset": {
+                  borderColor: "rgba(255,255,255,0.08)",
+                  borderWidth: "1.5px",
+                },
+
+                "&:hover fieldset": {
+                  borderColor: "#a855f7",
+                },
+
+                "&.Mui-focused fieldset": {
+                  borderColor: "#c026d3",
+
+                  boxShadow:
+                    "0 0 18px rgba(168,85,247,0.35)",
+                },
+              },
+
+              "& input": {
+                color: "white",
+
+                padding: "18px",
+
+                fontSize: "1rem",
+
+                fontWeight: 500,
+              },
+            }}
+          />
+:<></>}
+
+          {/* ===== EMAIL ===== */}
+
+          <TextField
+            fullWidth
+            label="Username"
+            id="username"
+            variant="outlined"
+            margin="normal"
+            value={username}
+            onChange={(e)=>setUsername(e.target.value)}
+
+            InputLabelProps={{
+              shrink: false,
+            }}
+            inputProps={{
+  autoComplete: "off",
+}}
+            sx={{
+              position: "relative",
+              zIndex: 1,
+              "& input:-webkit-autofill": {
+  WebkitBoxShadow:
+    "0 0 0 1000px rgb(28, 28, 54) inset",
+
+  WebkitTextFillColor: "white",
+
+  caretColor: "white",
+
+  borderRadius: "18px",
+
+  transition:
+    "background-color 9999s ease-in-out 0s",
+},
+              "& .MuiInputLabel-root": {
+                color: "#c084fc",
+                fontSize: "0.95rem",
+                fontWeight: 500,
+              },
+
+              "& .MuiInputLabel-root.Mui-focused": {
+                color: "#e879f9",
+              },
+
+              "& .MuiOutlinedInput-root": {
+                borderRadius: "18px",
+
+                background:
+                  "linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+
+                backdropFilter: "blur(12px)",
+
+                "& fieldset": {
+                  borderColor: "rgba(255,255,255,0.08)",
+                  borderWidth: "1.5px",
+                },
+
+                "&:hover fieldset": {
+                  borderColor: "#a855f7",
+                },
+
+                "&.Mui-focused fieldset": {
+                  borderColor: "#c026d3",
+
+                  boxShadow:
+                    "0 0 18px rgba(168,85,247,0.35)",
+                },
+              },
+
+              "& input": {
+                color: "white",
+
+                padding: "18px",
+
+                fontSize: "1rem",
+
+                fontWeight: 500,
+              },
+            }}
+          />
+
+          {/* ===== PASSWORD ===== */}
+
+          <TextField
+            fullWidth
+            label="Password"
+            type="password"
+            variant="outlined"
+            margin="normal"
+            value={password}
+            onChange={(e)=>setPassword(e.target.value)}
+
+           
+             InputLabelProps={{
+    shrink: false,
+  }}
+
+  inputProps={{
+    autoComplete: "off",
+  }}
+            sx={{
+              mt: 3,
+
+              position: "relative",
+              zIndex: 1,
+              "& input:-webkit-autofill": {
+  WebkitBoxShadow:
+    "0 0 0 1000px rgb(28, 28, 54) inset",
+
+  WebkitTextFillColor: "white",
+
+  caretColor: "white",
+
+  borderRadius: "18px",
+
+  transition:
+    "background-color 9999s ease-in-out 0s",
+},
+              
+
+              "& .MuiInputLabel-root": {
+                color: "#c084fc",
+                fontSize: "0.95rem",
+                fontWeight: 500,
+              },
+
+              "& .MuiInputLabel-root.Mui-focused": {
+                color: "#e879f9",
+              },
+
+              "& .MuiOutlinedInput-root": {
+                borderRadius: "18px",
+
+                background:
+                  "linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+
+                backdropFilter: "blur(12px)",
+
+                "& fieldset": {
+                  borderColor: "rgba(255,255,255,0.08)",
+                  borderWidth: "1.5px",
+                },
+
+                "&:hover fieldset": {
+                  borderColor: "#a855f7",
+                },
+
+                "&.Mui-focused fieldset": {
+                  borderColor: "#c026d3",
+
+                  boxShadow:
+                    "0 0 18px rgba(168,85,247,0.35)",
+                },
+              },
+
+              "& input": {
+                color: "white",
+
+                padding: "18px",
+
+                fontSize: "1rem",
+
+                fontWeight: 500,
+              },
+            }}
+          />
+
+          {/* ===== REMEMBER ===== */}
+
+          <FormControlLabel
+            sx={{
+              mt: 1,
+              color: "rgba(255,255,255,0.7)",
+              position: "relative",
+              zIndex: 1,
+            }}
+            control={
+              <Checkbox
+                sx={{
+                  color: "#a855f7",
+
+                  "&.Mui-checked": {
+                    color: "#c026d3",
+                  },
+                }}
+              />
+            }
+            label="Remember me"
+          />
+          {/* ===== LOGIN BUTTON ===== */}
+
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={handleAuth}
+            sx={{
+              mt: 4,
+
+              py: 1.6,
+
+              borderRadius: "18px",
+
+              fontWeight: 700,
+
+              fontSize: "1rem",
+
+              letterSpacing: 1.2,
+
+              position: "relative",
+
+              zIndex: 1,
+
+              background:
+                "linear-gradient(90deg, #7f00ff, #e100ff)",
+
+              boxShadow:
+                "0 0 25px rgba(161,0,255,0.5)",
+
+              transition: "0.3s ease",
+
+              "&:hover": {
+                transform: "translateY(-2px)",
+
+                background:
+                  "linear-gradient(90deg, #9333ea, #c026d3)",
+
+                boxShadow:
+                  "0 0 35px rgba(161,0,255,0.7)",
+              },
+            }}
+          >
+            {formState === 0?"Login": "Register"}
+          </Button>
+        </Card>
+      </Stack>
+     <Snackbar
+  open={open}
+  autoHideDuration={4000}
+  onClose={() => setOpen(false)}
+  message={error ? error : messages}
+/>
+    </>
+  );
+}
+
+============================================================
+FILE: E:\VC\frontend\src\pages\LandingPage.jsx
+============================================================
+import React from 'react';
+import { Link } from "react-router-dom";
+import laptop from '../assets/laptop1.png';
+
+export default function Landing() {
+  return (
+    <div className="landingPageContainer">
+
+      {/* ===== NAVBAR ===== */}
+      <nav>
+        <div className="navHeader">
+          <h2>
+            <span style={{ color: "white" }}>Meet</span>
+            <span className="gradientText">Pro</span>
+          </h2>
+          <h5 className="subText">Video Conferencing</h5>
+        </div>
+
+        <div className="navlist">
+          <Link to="/" className="navLink">Join as Guest</Link>
+          <Link to="/register" className="navLink">Register</Link>
+          <Link to="/login" className="navButton">Login</Link>
+        </div>
+      </nav>
+
+      {/* ===== MAIN CONTENT ===== */}
+      <div className="landingMainContainer">
+
+        {/* LEFT SECTION */}
+        <div className="left">
+          <h1>Connect.</h1>
+          <h1 className="gradientText">Collaborate.</h1>
+          <h1>Communicate.</h1>
+
+          <br /><br />
+          <span><hr /></span>
+          <br /><br />
+          <p  style={{ color: "grey" }}>Hd video calls.</p>
+          <p style={{ color: "grey" }}>Anywhere,anytime.</p>
+          <br />
+          <br />
+          <Link to="/home" className="ctaButton">
+            Get Started →
+          </Link>
+        </div>
+
+        {/* RIGHT SECTION */}
+        <div className="right">
+          <img src={laptop} alt="laptop" />
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+============================================================
+FILE: E:\VC\frontend\src\pages\VideoComponent.css
+============================================================
+
+============================================================
+FILE: E:\VC\frontend\src\pages\VideoMeet.jsx
+============================================================
+import React, { useEffect, useRef, useState } from 'react'
+import io from "socket.io-client";
+import bgImage from "../assets/vc.2.png";
+
+import { Badge, IconButton, TextField } from '@mui/material';
+import { Button } from '@mui/material';
+
+import VideocamIcon from '@mui/icons-material/Videocam';
+import VideocamOffIcon from '@mui/icons-material/VideocamOff'
+
+import styles from "../styles/videoComponent.module.css";
+
+import CallEndIcon from '@mui/icons-material/CallEnd'
+
+import MicIcon from '@mui/icons-material/Mic'
+import MicOffIcon from '@mui/icons-material/MicOff'
+
+import ScreenShareIcon from '@mui/icons-material/ScreenShare';
+import StopScreenShareIcon from '@mui/icons-material/StopScreenShare'
+
+import ChatIcon from '@mui/icons-material/Chat'
+
+const server_url = "http://localhost:8000";
+
+const peerConfigConnections = {
+    iceServers: [
+        {
+            urls: "stun:stun.l.google.com:19302"
+        }
+    ]
+};
+
+// =========================================
+// STABLE VIDEO COMPONENT
+// =========================================
+
+const VideoPlayer = ({
+    stream,
+    muted,
+    className,
+    style
+}) => {
+
+    const videoRef = useRef();
+
+    useEffect(() => {
+
+        if (
+            videoRef.current &&
+            stream
+        ) {
+
+            videoRef.current.srcObject =
+                stream;
+        }
+
+    }, [stream]);
+
+    return (
+
+        <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted={muted}
+            className={className}
+            style={style}
+        ></video>
+    );
+};
+
+export default function VideoMeetComponent() {
+
+    // =========================================
+    // REFS
+    // =========================================
+
+    const socketRef = useRef();
+
+    const socketIdRef = useRef();
+
+    const connections = useRef({});
+    const usersRef = useRef({});
+
+    // =========================================
+    // STATES
+    // =========================================
+
+    const [videoAvailable, setVideoAvailable] =
+        useState(true);
+
+    const [audioAvailable, setAudioAvailable] =
+        useState(true);
+
+    // BEFORE JOIN THESE STATES DECIDE INITIAL MEDIA
+
+    const [video, setVideo] =
+        useState(true);
+
+    const [audio, setAudio] =
+        useState(true);
+
+    const [screen, setScreen] =
+        useState(false);
+
+    const [screenAvailable, setScreenAvailable] =
+        useState(false);
+
+    const [askForUsername, setAskForUsername] =
+        useState(true);
+
+    const [username, setUsername] =
+        useState("");
+
+    const [videos, setVideos] =
+        useState([]);
+
+    const [messages, setMessages] =
+        useState([]);
+
+    const [message, setMessage] =
+        useState("");
+
+    const [newMessages, setNewMessages] =
+        useState(0);
+
+    const [showModal, setModal] =
+        useState(false);
+
+    const [localStream, setLocalStream] =
+        useState(null);
+
+    // =========================================
+    // PERMISSIONS
+    // =========================================
+
+   useEffect(() => {
+
+    getPermissions();
+
+    // START PREVIEW
+
+    startPreview();
+
+    // CLEANUP
+
+    return () => {
+
+        if (
+            window.previewStream
+        ) {
+
+            window.previewStream
+                .getTracks()
+                .forEach(
+                    track =>
+                        track.stop()
+                );
+        }
+    };
+
+}, []);
+
+    const getPermissions = async () => {
+
+        try {
+
+            const videoPermission =
+                await navigator.mediaDevices.getUserMedia({
+                    video: true
+                });
+
+            videoPermission
+                .getTracks()
+                .forEach(
+                    track =>
+                        track.stop()
+                );
+
+            setVideoAvailable(true);
+
+        } catch (e) {
+
+            setVideoAvailable(false);
+        }
+
+        try {
+
+            const audioPermission =
+                await navigator.mediaDevices.getUserMedia({
+                    audio: true
+                });
+
+            audioPermission
+                .getTracks()
+                .forEach(
+                    track =>
+                        track.stop()
+                );
+
+            setAudioAvailable(true);
+
+        } catch (e) {
+
+            setAudioAvailable(false);
+        }
+
+        if (
+            navigator.mediaDevices.getDisplayMedia
+        ) {
+
+            setScreenAvailable(true);
+        }
+    };
+const startPreview =
+    async () => {
+
+        try {
+
+            // STOP OLD PREVIEW
+
+            if (
+                window.previewStream
+            ) {
+
+                window.previewStream
+                    .getTracks()
+                    .forEach(
+                        track =>
+                            track.stop()
+                    );
+            }
+
+            // VIDEO OFF IN LOBBY
+
+            if (!video) {
+
+                setLocalStream(null);
+
+                return;
+            }
+
+            const previewStream =
+                await navigator
+                    .mediaDevices
+                    .getUserMedia({
+                        video: true,
+                        audio: false
+                    });
+
+            window.previewStream =
+                previewStream;
+
+            setLocalStream(
+                previewStream
+            );
+
+        } catch (e) {
+
+            console.log(e);
+        }
+    };
+    // =========================================
+    // CREATE MEDIA STREAM
+    // =========================================
+
+    const createMediaStream =
+        async (
+            videoEnabled,
+            audioEnabled
+        ) => {
+
+            // BOTH OFF
+
+            if (
+                !videoEnabled &&
+                !audioEnabled
+            ) {
+
+                const blackSilence =
+                    new MediaStream([
+                        black(),
+                        silence()
+                    ]);
+
+                return blackSilence;
+            }
+
+            return await navigator
+                .mediaDevices
+                .getUserMedia({
+                    video:
+                        videoEnabled,
+                    audio:
+                        audioEnabled,
+                });
+        };
+
+    // =========================================
+    // UPDATE LOCAL STREAM
+    // =========================================
+
+    const updateLocalStream =
+        async (
+            videoEnabled,
+            audioEnabled
+        ) => {
+
+            try {
+const oldStream =
+    window.localStream;
+                const stream =
+                    await createMediaStream(
+                        videoEnabled,
+                        audioEnabled
+                    );
+
+                // STOP OLD STREAM
+
+               
+                window.localStream =
+                    stream;
+
+                setLocalStream(
+                    stream
+                );
+
+                // =========================================
+                // REPLACE TRACKS
+                // =========================================
+
+                for (
+                    let id in
+                    connections.current
+                ) {
+
+                    const peerConnection =
+                        connections.current[
+                            id
+                        ];
+
+                    const senders =
+                        peerConnection.getSenders();
+
+                    stream
+                        .getTracks()
+                        .forEach(
+                            track => {
+
+                                const sender =
+                                    senders.find(
+                                        s =>
+                                            s.track &&
+                                            s.track.kind ===
+                                            track.kind
+                                    );
+
+                                if (
+                                    sender
+                                ) {
+
+                                    sender.replaceTrack(
+                                        track
+                                    );
+
+                                } else {
+
+                                    peerConnection.addTrack(
+                                        track,
+                                        stream
+                                    );
+                                }
+                            }
+                        );
+                }
+// STOP OLD STREAM AFTER REPLACEMENT
+
+setTimeout(() => {
+
+    if (
+        oldStream &&
+        oldStream !== stream
+    ) {
+
+        oldStream
+            .getTracks()
+            .forEach(
+                track =>
+                    track.stop()
+            );
+    }
+
+}, 1000);
+            } catch (e) {
+
+                console.log(e);
+            }
+        };
+
+    // =========================================
+    // TOGGLE MEDIA AFTER JOIN
+    // =========================================
+// =========================================
+// TOGGLE MEDIA AFTER JOIN
+// =========================================
+
+useEffect(() => {
+
+    if (
+        !askForUsername
+    ) {
+
+        updateLocalStream(
+            video,
+            audio
+        );
+    }
+
+}, [video, audio]);
+
+// =========================================
+// UPDATE PREVIEW BEFORE JOIN
+// =========================================
+
+useEffect(() => {
+
+    if (
+        askForUsername
+    ) {
+
+        startPreview();
+    }
+
+}, [video]);
+
+    // =========================================
+    // SIGNALS
+    // =========================================
+
+    const gotMessageFromServer =
+        async (
+            fromId,
+            message
+        ) => {
+            console.log(
+    "MESSAGE RECEIVED FROM:",
+    fromId
+);
+
+console.log(
+    "RAW MESSAGE:",
+    message
+);
+
+            const signal =
+                JSON.parse(message);
+console.log(
+    "PARSED SIGNAL:",
+    signal
+);
+            if (
+                fromId ===
+                socketIdRef.current
+            ) {
+                return;
+            }
+
+            // =========================================
+            // CREATE PEER IF MISSING
+            // =========================================
+
+            if (
+                !connections.current[
+                    fromId
+                ]
+            ) {
+
+                const peerConnection =
+                    new RTCPeerConnection(
+                        peerConfigConnections
+                    );
+
+                connections.current[
+                    fromId
+                ] = peerConnection;
+
+                // ICE
+
+                peerConnection.onicecandidate =
+                    event => {
+
+                        if (
+                            event.candidate
+                        ) {
+
+                            socketRef.current.emit(
+                                "signal",
+                                fromId,
+                                JSON.stringify({
+                                    ice:
+                                        event.candidate
+                                })
+                            );
+                        }
+                    };
+
+                // TRACK
+
+                peerConnection.ontrack =
+                    event => {
+
+                        const stream =
+                            event.streams[0];
+
+                        if (
+                            !stream
+                        ) return;
+
+                        setVideos(
+                            videos => {
+
+                                const exists =
+                                    videos.find(
+                                        video =>
+                                            video.socketId ===
+                                            fromId
+                                    );
+
+                                if (
+                                    exists
+                                ) {
+
+                                    return videos.map(
+                                        video =>
+
+                                            video.socketId ===
+                                            fromId
+
+                                                ? {
+                                                    ...video,
+                                                    stream
+                                                }
+
+                                                : video
+                                    );
+                                }
+
+                               return [
+
+    ...videos,
+
+    {
+        socketId:
+            fromId,
+
+        stream,
+
+        username: usersRef.current?.[fromId]
+    }
+];
+                            }
+                        );
+                    };
+
+                // ADD LOCAL TRACKS
+
+                if (
+                    window.localStream
+                ) {
+
+                    window.localStream
+                        .getTracks()
+                        .forEach(
+                            track => {
+
+                                peerConnection
+                                    .addTrack(
+                                        track,
+                                        window.localStream
+                                    );
+                            }
+                        );
+                }
+            }
+
+            const peerConnection =
+                connections.current[
+                    fromId
+                ];
+
+            // SDP
+
+            if (
+                signal.sdp
+            ) {
+console.log(
+    "SDP RECEIVED FROM:",
+    fromId
+);
+
+console.log(
+    "SDP TYPE:",
+    signal.sdp.type
+);
+                await peerConnection
+                    .setRemoteDescription(
+                        new RTCSessionDescription(
+                            signal.sdp
+                        )
+                    );
+
+                if (
+                    signal.sdp.type ===
+                    "offer"
+                ) {
+console.log(
+    "CREATING ANSWER FOR:",
+    fromId
+);
+                    const description =
+                        await peerConnection
+                            .createAnswer();
+
+                    await peerConnection
+                        .setLocalDescription(
+                            description
+                        );
+
+                    socketRef.current.emit(
+                        "signal",
+                        fromId,
+                        JSON.stringify({
+                            sdp:
+                                peerConnection.localDescription
+                        })
+                    );
+                }
+            }
+
+            // ICE
+
+            if (
+                signal.ice
+            ) {
+console.log(
+    "ICE RECEIVED FROM:",
+    fromId
+);
+
+console.log(
+    signal.ice
+);
+                try {
+
+                    await peerConnection
+                        .addIceCandidate(
+                            new RTCIceCandidate(
+                                signal.ice
+                            )
+                        );
+
+                } catch (e) {
+
+                    console.log(e);
+                }
+            }
+        };
+
+    // =========================================
+    // SOCKET
+    // =========================================
+
+    const connectToSocketServer =
+        () => {
+
+            socketRef.current =
+                io.connect(
+                    server_url,
+                    {
+                        secure: false
+                    }
+                );
+
+            socketRef.current.on(
+                "signal",
+                gotMessageFromServer
+            );
+
+            socketRef.current.on(
+                "connect",
+                () => {
+
+                    socketIdRef.current =
+                        socketRef.current.id;
+console.log(
+    "SOCKET CONNECTED:",
+    socketRef.current.id
+);
+
+console.log(
+    "LOCAL STREAM:",
+    window.localStream
+);
+                    socketRef.current.emit(
+    "join-call",
+    {
+        path:
+            window.location.href,
+
+        username:
+            username
+    }
+);
+                    // CHAT
+
+                    socketRef.current.on(
+                        "chat-message",
+                        addMessage
+                    );
+
+                    // USER LEFT
+
+                    socketRef.current.on(
+                        "user-left",
+                        id => {
+
+                            setVideos(
+                                videos =>
+
+                                    videos.filter(
+                                        video =>
+                                            video.socketId !==
+                                            id
+                                    )
+                            );
+
+                            if (
+                                connections.current[
+                                    id
+                                ]
+                            ) {
+
+                                connections.current[
+                                    id
+                                ].close();
+
+                                delete connections.current[
+                                    id
+                                ];
+                            }
+                        }
+                    );
+
+                    // USER JOINED
+
+                    socketRef.current.on(
+                        "user-joined",
+                      (
+    id,
+    clients,
+    users
+) => {
+console.log(
+    "USER JOINED EVENT FIRED"
+);
+
+console.log(
+    "JOINED USER ID:",
+    id
+);
+
+console.log(
+    "CLIENTS:",
+    clients
+);
+usersRef.current =
+    users;
+                            clients.forEach(
+                                socketListId => {
+console.log(
+    "PROCESSING CLIENT:",
+    socketListId
+);
+                                    if (
+                                        socketListId ===
+                                        socketIdRef.current
+                                    ) {
+                                        return;
+                                    }
+
+                                    let peerConnection =
+                                        connections.current[
+                                            socketListId
+                                        ];
+
+                                    // CREATE PEER
+
+                                    if (
+                                        !peerConnection
+                                    ) {
+
+                                        peerConnection =
+                                            new RTCPeerConnection(
+                                                peerConfigConnections
+                                            );
+console.log(
+    "PEER CONNECTION CREATED FOR:",
+    socketListId
+);
+                                        connections.current[
+                                            socketListId
+                                        ] =
+                                            peerConnection;
+
+                                        // ICE
+
+                                        peerConnection.onicecandidate =
+                                            event => {
+console.log(
+    "ICE CANDIDATE GENERATED FOR:",
+    socketListId,
+    event.candidate
+);
+                                                if (
+                                                    event.candidate
+                                                ) {
+
+                                                    socketRef.current.emit(
+                                                        "signal",
+                                                        socketListId,
+                                                        JSON.stringify({
+                                                            ice:
+                                                                event.candidate
+                                                        })
+                                                    );
+                                                }
+                                            };
+
+                                        // TRACK
+
+                                        peerConnection.ontrack =
+                                            event => {
+console.log(
+    "ONTRACK FIRED FOR:",
+    socketListId
+);
+
+console.log(
+    "TRACKS:",
+    event.streams
+);
+
+console.log(
+    "TRACK OBJECT:",
+    event.track
+);
+                                                const stream =
+                                                    event.streams[0];
+
+                                                if (
+                                                    !stream
+                                                ) return;
+
+                                                setVideos(
+                                                    videos => {
+
+                                                        const exists =
+                                                            videos.find(
+                                                                video =>
+                                                                    video.socketId ===
+                                                                    socketListId
+                                                            );
+
+                                                        if (
+                                                            exists
+                                                        ) {
+
+                                                            return videos.map(
+                                                                video =>
+
+                                                                    video.socketId ===
+                                                                    socketListId
+
+                                                                        ? {
+                                                                            ...video,
+                                                                            stream
+                                                                        }
+
+                                                                        : video
+                                                            );
+                                                        }
+
+                                                     return [
+
+    ...videos,
+
+    {
+        socketId:
+            socketListId,
+
+        stream,
+
+        username: usersRef.current?.[socketListId]
+    }
+];
+                                                    }
+                                                );
+                                            };
+                                    }
+
+                                    // ADD TRACKS
+
+                                    if (
+                                        window.localStream
+                                    ) {
+
+                                        window.localStream
+                                            .getTracks()
+                                            .forEach(
+                                                track => {
+
+                                                    const senderExists =
+                                                        peerConnection
+                                                            .getSenders()
+                                                            .find(
+                                                                sender =>
+                                                                    sender.track &&
+                                                                    sender.track.kind ===
+                                                                    track.kind
+                                                            );
+
+                                                    if (
+                                                        !senderExists
+                                                    ) {
+
+                                                        peerConnection
+                                                            .addTrack(
+                                                                track,
+                                                                window.localStream
+                                                            );
+                                                    }
+                                                }
+                                            );
+                                    }
+
+                                    // CREATE OFFER
+
+                                    if (
+                                        id ===
+                                        socketIdRef.current
+                                    ) {
+console.log(
+    "CREATING OFFER FOR:",
+    socketListId
+);
+                                        peerConnection
+                                            .createOffer()
+
+                                            .then(
+                                                description =>
+
+                                                    peerConnection
+                                                        .setLocalDescription(
+                                                            description
+                                                        )
+                                            )
+
+                                            .then(() => {
+console.log(
+    "LOCAL DESCRIPTION SET FOR:",
+    socketListId
+);
+
+console.log(
+    "SENDING SDP OFFER:",
+    peerConnection.localDescription
+);
+                                                socketRef.current.emit(
+                                                    "signal",
+                                                    socketListId,
+                                                    JSON.stringify({
+                                                        sdp:
+                                                            peerConnection.localDescription
+                                                    })
+                                                );
+                                            })
+
+                                            .catch(
+                                                e =>
+                                                    console.log(
+                                                        e
+                                                    )
+                                            );
+                                    }
+                                }
+                            );
+                        }
+                    );
+                }
+            );
+        };
+
+    // =========================================
+    // BLACK + SILENCE
+    // =========================================
+
+    const silence = () => {
+
+        const ctx =
+            new AudioContext();
+
+        const oscillator =
+            ctx.createOscillator();
+
+        const dst =
+            oscillator.connect(
+                ctx.createMediaStreamDestination()
+            );
+
+        oscillator.start();
+
+        const track =
+            dst.stream.getAudioTracks()[0];
+
+        track.enabled = false;
+
+        return track;
+    };
+
+    const black = ({
+        width = 640,
+        height = 480
+    } = {}) => {
+
+        const canvas =
+            Object.assign(
+                document.createElement(
+                    "canvas"
+                ),
+                {
+                    width,
+                    height
+                }
+            );
+
+        canvas
+            .getContext("2d")
+            .fillRect(
+                0,
+                0,
+                width,
+                height
+            );
+
+        const stream =
+            canvas.captureStream();
+
+        const track =
+            stream.getVideoTracks()[0];
+
+        track.enabled = false;
+
+        return track;
+    };
+
+    // =========================================
+    // SCREEN SHARE
+    // =========================================
+
+    useEffect(() => {
+
+        if (
+            screen
+        ) {
+
+            startScreenShare();
+        }
+
+    }, [screen]);
+
+    const startScreenShare =
+        async () => {
+
+            try {
+
+                const stream =
+                    await navigator.mediaDevices.getDisplayMedia({
+                        video: true
+                    });
+
+                const screenTrack =
+                    stream.getVideoTracks()[0];
+
+                for (
+                    let id in
+                    connections.current
+                ) {
+
+                    const sender =
+                        connections.current[
+                            id
+                        ]
+                            .getSenders()
+                            .find(
+                                s =>
+                                    s.track &&
+                                    s.track.kind ===
+                                    "video"
+                            );
+
+                    if (
+                        sender
+                    ) {
+
+                        sender.replaceTrack(
+                            screenTrack
+                        );
+                    }
+                }
+
+                setLocalStream(
+                    stream
+                );
+
+                window.localStream =
+                    stream;
+
+                screenTrack.onended =
+                    () => {
+
+                        setScreen(false);
+
+                        updateLocalStream(
+                            video,
+                            audio
+                        );
+                    };
+
+            } catch (e) {
+
+                console.log(e);
+            }
+        };
+
+    // =========================================
+    // CHAT
+    // =========================================
+
+    const addMessage = (
+        data,
+        sender,
+        socketIdSender
+    ) => {
+
+        setMessages(
+            prev => [
+
+                ...prev,
+
+                {
+                    sender,
+                    data
+                }
+            ]
+        );
+
+        if (
+            socketIdSender !==
+            socketIdRef.current
+        ) {
+
+            setNewMessages(
+                prev => prev + 1
+            );
+        }
+    };
+
+    const sendMessage =
+        () => {
+
+            socketRef.current.emit(
+                "chat-message",
+                message,
+                username
+            );
+
+            setMessage("");
+        };
+
+    // =========================================
+    // HANDLERS
+    // =========================================
+
+    // =========================================
+// HANDLERS
+// =========================================
+
+const handleVideo =
+    () => {
+
+        const newVideoState =
+            !video;
+
+        setVideo(
+            newVideoState
+        );
+
+        // =========================================
+        // UPDATE ACTUAL VIDEO TRACK
+        // =========================================
+
+        if (
+            window.localStream
+        ) {
+
+            const videoTracks =
+                window.localStream.getVideoTracks();
+
+            videoTracks.forEach(
+                track => {
+
+                    track.enabled =
+                        newVideoState;
+                }
+            );
+        }
+
+        // =========================================
+        // BEFORE JOIN PREVIEW
+        // =========================================
+
+        if (
+            askForUsername
+        ) {
+
+            if (
+                newVideoState
+            ) {
+
+                startPreview();
+
+            } else {
+
+                if (
+                    window.previewStream
+                ) {
+
+                    window.previewStream
+                        .getTracks()
+                        .forEach(
+                            track =>
+                                track.stop()
+                        );
+                }
+
+                setLocalStream(
+                    null
+                );
+            }
+        }
+    };
+
+const handleAudio =
+    () => {
+
+        const newAudioState =
+            !audio;
+
+        setAudio(
+            newAudioState
+        );
+
+        // =========================================
+        // UPDATE ACTUAL AUDIO TRACK
+        // =========================================
+
+        if (
+            window.localStream
+        ) {
+
+            const audioTracks =
+                window.localStream.getAudioTracks();
+
+            audioTracks.forEach(
+                track => {
+
+                    track.enabled =
+                        newAudioState;
+                }
+            );
+        }
+    };
+    const handleScreen =
+        () => {
+
+            setScreen(
+                prev => !prev
+            );
+        };
+
+    const handleEndCall =
+        () => {
+
+            if (
+                window.localStream
+            ) {
+
+                window.localStream
+                    .getTracks()
+                    .forEach(
+                        track =>
+                            track.stop()
+                    );
+            }
+
+            window.location.href =
+                "/";
+        };
+
+    // =========================================
+    // CONNECT
+    // =========================================
+const connect =
+    async () => {
+
+        // =========================================
+        // USERNAME VALIDATION
+        // =========================================
+
+        if (
+            username.trim() === ""
+        ) {
+
+            alert(
+                "Please enter your username"
+            );
+
+            return;
+        }
+
+        try {
+
+            // STOP PREVIEW STREAM
+
+            if (
+                window.previewStream
+            ) {
+
+                window.previewStream
+                    .getTracks()
+                    .forEach(
+                        track =>
+                            track.stop()
+                    );
+            }
+
+            // CREATE ACTUAL MEETING STREAM
+
+            const stream =
+                await createMediaStream(
+                    video,
+                    audio
+                );
+
+            window.localStream =
+                stream;
+console.log(
+    "LOCAL STREAM CREATED:",
+    stream
+);
+            setLocalStream(
+                stream
+            );
+
+            // ENTER MEETING
+
+            setAskForUsername(
+                false
+            );
+
+            connectToSocketServer();
+
+        } catch (e) {
+
+            console.log(e);
+        }
+    };
+
+    // =========================================
+    // UI
+    // =========================================
+
+    return (
+
+        <div>
+
+            {
+                askForUsername ?
+<div
+className='previewbg'
+    style={{
+        minHeight: "100vh",
+        width: "100%",
+            backgroundImage: `url(${bgImage})`,
+        backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "30px",
+        boxSizing: "border-box"
+    }}
+>
+
+    <div
+        style={{
+            width: "100%",
+            maxWidth: "1200px",
+            display: "flex",
+            gap: "40px",
+            alignItems: "center",
+            justifyContent: "center",
+            flexWrap: "wrap"
+        }}
+    >
+
+        {/* LEFT SIDE */}
+
+        <div
+            style={{
+                flex: 1,
+                minWidth: "320px",
+                color: "white"
+            }}
+        >
+
+            <h1
+                style={{
+                    fontSize: "48px",
+                    marginBottom: "15px",
+                    fontWeight: "600"
+                }}
+            >
+                Ready to Join?
+            </h1>
+
+            <p
+                style={{
+                    color: "#b0b3b8",
+                    fontSize: "18px",
+                    marginBottom: "35px"
+                }}
+            >
+                Check your camera and microphone before entering the meeting.
+            </p>
+
+            <TextField
+                label="Enter Your Name"
+                variant="outlined"
+                value={username}
+                onChange={(e) =>
+                    setUsername(
+                        e.target.value
+                    )
+                }
+                sx={{
+                    width: "100%",
+                    maxWidth: "400px",
+                    backgroundColor: "white",
+                    borderRadius: "8px",
+                    marginBottom: "25px"
+                }}
+            />
+
+            {/* CONTROLS */}
+
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "20px",
+                    marginBottom: "30px"
+                }}
+            >
+
+                {/* VIDEO */}
+
+                <IconButton
+                    onClick={handleVideo}
+                    style={{
+                        backgroundColor:
+                            video
+                                ? "#3c4043"
+                                : "#ea4335",
+
+                        color: "white",
+                        width: "60px",
+                        height: "60px"
+                    }}
+                >
+
+                    {
+                        video ?
+
+                            <VideocamIcon />
+
+                            :
+
+                            <VideocamOffIcon />
+                    }
+
+                </IconButton>
+
+                {/* AUDIO */}
+
+                <IconButton
+                    onClick={handleAudio}
+                    style={{
+                        backgroundColor:
+                            audio
+                                ? "#3c4043"
+                                : "#ea4335",
+
+                        color: "white",
+                        width: "60px",
+                        height: "60px"
+                    }}
+                >
+
+                    {
+                        audio ?
+
+                            <MicIcon />
+
+                            :
+
+                            <MicOffIcon />
+                    }
+
+                </IconButton>
+
+            </div>
+
+            {/* JOIN BUTTON */}
+
+            <Button
+                variant="contained"
+                onClick={connect}
+                 className="ctaButton"
+                
+            >
+                Join Meeting
+            </Button>
+
+        </div>
+
+        {/* RIGHT SIDE VIDEO PREVIEW */}
+
+        <div
+            style={{
+                flex: 1,
+                minWidth: "320px",
+                display: "flex",
+                justifyContent: "center"
+            }}
+        >
+
+            <div
+                style={{
+                    width: "100%",
+                    maxWidth: "550px",
+                    height: "380px",
+                    backgroundColor: "black",
+                    borderRadius: "20px",
+                    overflow: "hidden",
+                    position: "relative",
+                    boxShadow:
+                        "0px 4px 20px rgba(0,0,0,0.4)"
+                }}
+            >
+
+                {
+                    localStream ? (
+
+                        <VideoPlayer
+                            stream={localStream}
+                            muted={true}
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover"
+                            }}
+                        />
+
+                    ) : (
+
+                        <div
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                backgroundColor: "black",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "white",
+                                fontSize: "26px",
+                                fontWeight: "500"
+                            }}
+                        >
+                            Camera Off
+                        </div>
+                    )
+                }
+
+                {/* YOU LABEL */}
+
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: "15px",
+                        left: "15px",
+                        backgroundColor:
+                            "rgba(0,0,0,0.5)",
+                        padding: "8px 14px",
+                        borderRadius: "20px",
+                        color: "white",
+                        fontWeight: "500",
+                        fontSize: "14px"
+                    }}
+                >
+                    You
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+                    
+:
+(
+    <div
+        className={
+            styles.meetVideoContainer
+        }
+    >
+
+        {/* MAIN REMOTE VIDEO */}
+
+        {/* MAIN VIDEO AREA */}
+
+{/* MAIN VIDEO AREA */}
+
+{/* MAIN VIDEO AREA */}
+
+<div
+    style={{
+        position: "fixed",
+        top: "0",
+        left: "0",
+
+        width: "100%",
+        height: "100vh",
+
+        backgroundColor: "#181A1B",
+
+        overflow: "hidden",
+
+        zIndex: 1
+    }}
+>
+
+    {
+        localStream ? (
+
+            <VideoPlayer
+                stream={localStream}
+                muted={true}
+                style={{
+                    width: "100%",
+                    height: "100%",
+
+                    objectFit: "cover"
+                }}
+            />
+
+        ) : (
+
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+
+                    backgroundColor:
+                        "#202124",
+
+                    display: "flex",
+
+                    alignItems: "center",
+
+                    justifyContent: "center",
+
+                    color: "white",
+
+                    fontSize: "42px",
+
+                    fontWeight: "600"
+                }}
+            >
+
+                {username}
+
+            </div>
+        )
+    }
+
+    {/* YOUR NAME */}
+
+    <div
+        style={{
+            position: "absolute",
+
+            bottom: "25px",
+            left: "25px",
+
+            backgroundColor:
+                "rgba(0,0,0,0.45)",
+
+            padding: "10px 18px",
+
+            borderRadius: "30px",
+
+            color: "white",
+
+            fontSize: "16px",
+
+            fontWeight: "500",
+
+            backdropFilter:
+                "blur(6px)"
+        }}
+    >
+
+        {username} (You)
+
+    </div>
+
+</div>
+
+        {/* CHAT */}
+
+        {
+            showModal &&
+
+            <div
+                className={
+                    styles.chatRoom
+                }
+                style={{
+                    zIndex: 40
+                }}
+            >
+
+                <div
+                    className={
+                        styles.chatContainer
+                    }
+                >
+
+                    <h1>
+                        Chat
+                    </h1>
+
+                    <div
+                        className={
+                            styles.chattingDisplay
+                        }
+                    >
+
+                        {
+                            messages.length !== 0
+
+                                ?
+
+                                messages.map(
+                                    (
+                                        item,
+                                        index
+                                    ) => (
+
+                                        <div
+                                            key={index}
+                                            style={{
+                                                marginBottom:
+                                                    "20px"
+                                            }}
+                                        >
+
+                                            <p
+                                                style={{
+                                                    fontWeight:
+                                                        "bold"
+                                                }}
+                                            >
+                                                {
+                                                    item.sender
+                                                }
+                                            </p>
+
+                                            <p>
+                                                {
+                                                    item.data
+                                                }
+                                            </p>
+
+                                        </div>
+                                    )
+                                )
+
+                                :
+
+                                <p>
+                                    No Messages Yet
+                                </p>
+                        }
+
+                    </div>
+
+                    <div
+                        className={
+                            styles.chattingArea
+                        }
+                    >
+
+                        <TextField
+                            value={message}
+                            onChange={e =>
+                                setMessage(
+                                    e.target.value
+                                )
+                            }
+                            label="Enter Your Chat"
+                        />
+
+                        <Button
+                            variant="contained"
+                            onClick={sendMessage}
+                        >
+                            Send
+                        </Button>
+
+                    </div>
+
+                </div>
+
+            </div>
+        }
+
+        {/* BUTTONS */}
+
+        <div
+            className={
+                styles.buttonContainers
+            }
+            style={{
+                zIndex: 30,
+                position: "fixed",
+                bottom: "20px",
+                left: "50%",
+                transform:
+                    "translateX(-50%)"
+            }}
+        >
+
+            <IconButton
+                onClick={handleVideo}
+                style={{
+                    color:
+                        "white"
+                }}
+            >
+
+                {
+                    video
+
+                        ? <VideocamIcon />
+
+                        : <VideocamOffIcon />
+                }
+
+            </IconButton>
+
+            <IconButton
+                onClick={handleEndCall}
+                style={{
+                    color:
+                        "red"
+                }}
+            >
+
+                <CallEndIcon />
+
+            </IconButton>
+
+            <IconButton
+                onClick={handleAudio}
+                style={{
+                    color:
+                        "white"
+                }}
+            >
+
+                {
+                    audio
+
+                        ? <MicIcon />
+
+                        : <MicOffIcon />
+                }
+
+            </IconButton>
+
+            {
+                screenAvailable &&
+
+                <IconButton
+                    onClick={handleScreen}
+                    style={{
+                        color:
+                            "white"
+                    }}
+                >
+
+                    {
+                        screen
+
+                            ? <StopScreenShareIcon />
+
+                            : <ScreenShareIcon />
+                    }
+
+                </IconButton>
+            }
+
+            <Badge
+                badgeContent={
+                    newMessages
+                }
+                max={999}
+                color="primary"
+            >
+
+                <IconButton
+                    onClick={() =>
+                        setModal(
+                            !showModal
+                        )
+                    }
+                    style={{
+                        color:
+                            "white"
+                    }}
+                >
+
+                    <ChatIcon />
+
+                </IconButton>
+
+            </Badge>
+
+        </div>
+
+        {/* LOCAL VIDEO */}
+
+       {/* LOCAL VIDEO */}
+
+
+        {/* OTHER REMOTE USERS */}
+
+        {/* OTHER REMOTE USERS */}
+{/* OTHER REMOTE USERS */}
+
+<div
+    style={{
+        position: "fixed",
+
+        top: "25px",
+        left: "25px",
+
+        width: "320px",
+
+        maxHeight: "70vh",
+
+        overflowY: "auto",
+
+        display: "grid",
+
+        gridTemplateColumns:
+            "repeat(auto-fill, minmax(150px, 1fr))",
+
+        gap: "15px",
+
+        zIndex: 20
+    }}
+>
+
+    {
+        videos
+            .map(
+                (
+                    video
+                ) => (
+
+                    <div
+                        key={
+                            video.socketId
+                        }
+
+                        style={{
+
+                            width: "150px",
+
+                            height: "110px",
+
+                            borderRadius: "16px",
+
+                            overflow: "hidden",
+
+                            position: "relative",
+
+                            backgroundColor:
+                                "#202124",
+
+                            border:
+                                "2px solid rgba(255,255,255,0.12)",
+
+                            boxShadow:
+                                "0px 4px 15px rgba(0,0,0,0.35)"
+                        }}
+                    >
+
+                        {
+                            video.stream ? (
+
+                                <VideoPlayer
+                                    stream={
+                                        video.stream
+                                    }
+
+                                    muted={false}
+
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+
+                                        objectFit: "cover"
+                                    }}
+                                />
+
+                            ) : (
+
+                                <div
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+
+                                        display: "flex",
+
+                                        alignItems: "center",
+
+                                        justifyContent: "center",
+
+                                        backgroundColor:
+                                            "#202124",
+
+                                        color: "white",
+
+                                        fontSize: "16px",
+
+                                        fontWeight: "600",
+
+                                        textAlign: "center",
+
+                                        padding: "10px"
+                                    }}
+                                >
+
+                                    {
+                                        video?.username ||
+                                        "User"
+                                    }
+
+                                </div>
+                            )
+                        }
+
+                        {/* USERNAME */}
+
+                        <div
+                            style={{
+                                position: "absolute",
+
+                                bottom: "8px",
+                                left: "8px",
+
+                                backgroundColor:
+                                    "rgba(0,0,0,0.45)",
+
+                                padding:
+                                    "4px 10px",
+
+                                borderRadius:
+                                    "20px",
+
+                                color: "white",
+
+                                fontSize: "11px",
+
+                                fontWeight: "500",
+
+                                maxWidth: "85%",
+
+                                overflow: "hidden",
+
+                                whiteSpace: "nowrap",
+
+                                textOverflow:
+                                    "ellipsis"
+                            }}
+                        >
+
+                            {
+                                video?.username ||
+                                "User"
+                            }
+
+                        </div>
+
+                    </div>
+                )
+            )
+    }
+
+</div>
+    </div>
+)
+}
+
+</div>
+);
+}
+                    
+
+                        
+   
+
+============================================================
+FILE: E:\VC\frontend\src\styles\videoComponent.module.css
+============================================================
+.meetVideoContainer {
+    position: relative;
+    height: 100vh;
+    background: rgb(1, 4, 48);
+}
+
+.meetUserVideo {
+    position: absolute;
+    bottom: 10vh;
+    height: 20vh;
+    width: auto;
+    left: 0;
+    border-radius: 20px;
+}
+
+.buttonContainers {
+    position: absolute;
+    width: 100vw;
+    bottom: 0;
+    text-align: center;
+}
+
+.buttonContainers svg {
+    font-size: 3rem;
+}
+
+.conferenceView { 
+
+    display: flex;
+    
+    padding: 10px;
+    gap: 10px;
+}
+
+.conferenceView  video {
+    width: 40vw;
+    height: 20vh;
+    min-width: 30vw;
+    border-radius: 10px;
+}
+
+.chatRoom {
+    position: absolute;
+    height: 90vh;
+    right: 0;
+    background: white;
+    border-radius: 10px;
+    width: 30vw;
+    padding-inline: 20px;
+}
+
+.chatContainer {
+    position: relative;
+    height: 100%;
+}
+
+
+.chattingArea {
+    position: absolute;
+    bottom: 0;
+}
+.ctaButton {
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 30px;
+  font-weight: 500;
+  color: white;
+
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+
+  box-shadow: 
+    0 0 20px rgba(123,97,255,0.6),
+    0 0 40px rgba(79,140,255,0.3);
+
+  transition: 0.3s;
+}

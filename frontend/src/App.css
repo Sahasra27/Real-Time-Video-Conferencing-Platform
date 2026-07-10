@@ -1,0 +1,175 @@
+
+.landingPageContainer {
+  width: 100vw;
+  height: 100vh;
+  background-image: url('./assets/vc.2.png');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  color: white;
+  overflow-x: hidden;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+/* ====== NAVBAR ====== */
+.landingPageContainer nav {
+  padding: 1.2rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.subText {
+  color: grey;
+  font-size: 0.8rem;
+}
+
+/* ====== GRADIENT TEXT ====== */
+.gradientText {
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ====== NAV LINKS ====== */
+.navlist {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.navLink {
+  text-decoration: none;
+  color: #cfcfff;
+  font-size: 0.9rem;
+  position: relative;
+  transition: 0.3s;
+}
+
+.navLink::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  width: 0%;
+  height: 2px;
+  background: #7B61FF;
+  transition: 0.3s;
+}
+
+.navLink:hover {
+  color: white;
+}
+
+.navLink:hover::after {
+  width: 100%;
+}
+
+/* ====== NAV BUTTON ====== */
+.navButton {
+  text-decoration: none;
+  padding: 8px 18px;
+  border-radius: 20px;
+  background: rgba(123,97,255,0.15);
+  border: 1px solid rgba(123,97,255,0.4);
+  color: white;
+  backdrop-filter: blur(10px);
+  transition: 0.3s;
+}
+
+.navButton:hover {
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+  box-shadow: 0 0 15px rgba(123,97,255,0.6);
+}
+
+/* ====== MAIN ====== */
+.landingMainContainer {
+  padding: 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ====== LEFT ====== */
+.left {
+  margin: 50px;
+  flex: 1;
+}
+
+.left h1 {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+.left hr {
+  width: 300px;
+  border: 2px solid #7B61FF;
+  margin-top: 20px;
+  border-radius: 5px;
+}
+
+/* ====== CTA BUTTON ====== */
+.ctaButton {
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 30px;
+  font-weight: 500;
+  color: white;
+
+  background: linear-gradient(90deg, #7B61FF, #4F8CFF);
+
+  box-shadow: 
+    0 0 20px rgba(123,97,255,0.6),
+    0 0 40px rgba(79,140,255,0.3);
+
+  transition: 0.3s;
+}
+
+.ctaButton:hover {
+  box-shadow: 
+    0 0 0.5px rgba(123,97,255,0.6),
+    0 0 0.5px rgba(79,140,255,0.3);
+}
+
+/* ====== RIGHT ====== */
+.right {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ====== IMAGE BLENDING ====== */
+.right img {
+  width: 100%;
+  max-width: 700px;
+  height: auto;
+  border-radius: 20px;
+
+  -webkit-mask-image:
+    linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 30%),
+    linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 12%),
+    linear-gradient(to left, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%),
+    linear-gradient(to top, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 12%);
+
+  -webkit-mask-composite: destination-in;
+  mask-composite: intersect;
+
+  box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+}
+
+/* ====== MOBILE ====== */
+@media (max-width: 768px) {
+  .landingMainContainer {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .left {
+    margin: 20px;
+  }
+
+  .right img {
+    max-width: 90%;
+  }
+}
