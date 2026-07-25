@@ -349,7 +349,3 @@ Building this project helped me gain practical understanding of:
 - Real-Time Distributed Systems
 
 ---
-
-# License
-
-This project is licensed under the ISC License.
