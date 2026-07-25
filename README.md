@@ -3,14 +3,48 @@
 
 A browser-based multi-party video conferencing platform built using **React**, **Node.js**, **WebRTC**, and **Socket.IO**.
 
-## Application Preview
+# Application Preview
+
+## Secure Authentication
+
+<table align="center">
+<tr>
+
+<td align="center" width="50%">
+
+<img src="YOUR_LOGIN_IMAGE_URL" width="100%" alt="Login Page"/>
+
+**Login**
+
+Secure user login with session token authentication and bcrypt password verification.
+
+</td>
+
+<td align="center" width="50%">
+
+<img src="YOUR_REGISTER_IMAGE_URL" width="100%" alt="Registration Page"/>
+
+**Registration**
+
+New users can create an account with securely hashed passwords before joining meetings.
+
+</td>
+
+</tr>
+</table>
+
+---
+
+## Meeting Interface
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/91a8d4f8-8621-4bcd-9f29-542b897a1e20" width="90%" alt="Video Conference Meeting"/>
+  <img src="https://github.com/user-attachments/assets/91a8d4f8-8621-4bcd-9f29-542b897a1e20"
+       width="90%"
+       alt="Meeting Interface"/>
 </p>
 
 <p align="center">
-  <b>Meeting Interface</b>
+<b>Multi-Party Video Conference</b>
 </p>
 
 ---
@@ -19,22 +53,33 @@ A browser-based multi-party video conferencing platform built using **React**, *
 
 <table align="center">
 <tr>
-<td align="center" width="50%">
-<img src="https://github.com/user-attachments/assets/dfdda671-3fa1-40c8-917f-828c64ea245e" width="100%" alt="Lobby Preview"/>
 
-<b>Lobby Preview</b><br>
-Camera & microphone preview before joining.
+<td align="center" width="50%">
+
+<img src="https://github.com/user-attachments/assets/dfdda671-3fa1-40c8-917f-828c64ea245e"
+width="100%"
+alt="Lobby Preview"/>
+
+**Lobby Preview**
+
+Preview camera and microphone before joining the meeting.
+
 </td>
 
 <td align="center" width="50%">
-<img src="https://github.com/user-attachments/assets/06955ec8-065b-4953-b5ce-584f31322c5c" width="100%" alt="In-call Chat"/>
 
-<b>Real-Time Chat</b><br>
-Integrated messaging during meetings.
+<img src="https://github.com/user-attachments/assets/06955ec8-065b-4953-b5ce-584f31322c5c"
+width="100%"
+alt="Real-Time Chat"/>
+
+**Real-Time Chat**
+
+Integrated messaging during active video conferences.
+
 </td>
+
 </tr>
 </table>
-
 ---
 
 # Tech Stack
