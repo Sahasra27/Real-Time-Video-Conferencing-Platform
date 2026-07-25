@@ -2,11 +2,41 @@
 
 A browser-based multi-party video conferencing platform inspired by Zoom and Google Meet, built using **React**, **Node.js**, **WebRTC**, and **Socket.IO**. The application enables secure peer-to-peer audio/video communication, screen sharing, and real-time chat through a custom WebRTC signaling server.
 
+# Real-Time Video Conferencing Platform
+
+A browser-based multi-party video conferencing platform built using **React**, **Node.js**, **WebRTC**, and **Socket.IO**.
+
+## Application Preview
+
 <p align="center">
-  <img width="100%" src="https://github.com/user-attachments/assets/91a8d4f8-8621-4bcd-9f29-542b897a1e20" alt="Application Screenshot">
-  <img width="1902" height="836" alt="image" src="https://github.com/user-attachments/assets/dfdda671-3fa1-40c8-917f-828c64ea245e" />
-  <img width="1907" height="900" alt="image" src="https://github.com/user-attachments/assets/06955ec8-065b-4953-b5ce-584f31322c5c" />
+  <img src="https://github.com/user-attachments/assets/91a8d4f8-8621-4bcd-9f29-542b897a1e20" width="90%" alt="Video Conference Meeting"/>
 </p>
+
+<p align="center">
+  <b>Meeting Interface</b>
+</p>
+
+---
+
+## Features in Action
+
+<table align="center">
+<tr>
+<td align="center" width="50%">
+<img src="https://github.com/user-attachments/assets/dfdda671-3fa1-40c8-917f-828c64ea245e" width="100%" alt="Lobby Preview"/>
+
+<b>Lobby Preview</b><br>
+Camera & microphone preview before joining.
+</td>
+
+<td align="center" width="50%">
+<img src="https://github.com/user-attachments/assets/06955ec8-065b-4953-b5ce-584f31322c5c" width="100%" alt="In-call Chat"/>
+
+<b>Real-Time Chat</b><br>
+Integrated messaging during meetings.
+</td>
+</tr>
+</table>
 
 ---
 
