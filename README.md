@@ -13,7 +13,9 @@ A browser-based multi-party video conferencing platform built using **React**, *
 <td align="center" width="50%">
 
 <img src="https://github.com/user-attachments/assets/c6286b5f-a416-4694-9c6a-65f7dda76827" width="100%" alt="Login Page"/>
+
 **Login**
+
 Secure user login with session token authentication and bcrypt password verification.
 
 </td>
@@ -21,7 +23,6 @@ Secure user login with session token authentication and bcrypt password verifica
 <td align="center" width="50%">
 
 <img  src="https://github.com/user-attachments/assets/ac8dad72-561d-4f67-a6eb-4a911f36f03d" width="100%" alt="Registration Page"/>
-
 
 **Registration**
 
