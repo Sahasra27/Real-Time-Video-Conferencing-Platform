@@ -1,6 +1,3 @@
-# Real-Time Video Conferencing Platform
-
-A browser-based multi-party video conferencing platform inspired by Zoom and Google Meet, built using **React**, **Node.js**, **WebRTC**, and **Socket.IO**. The application enables secure peer-to-peer audio/video communication, screen sharing, and real-time chat through a custom WebRTC signaling server.
 
 # Real-Time Video Conferencing Platform
 
